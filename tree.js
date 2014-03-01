@@ -2,93 +2,21 @@ function debug(a) {
   console.log(JSON.stringify(a, null, '  '))
 }
 
-var id = 0;
-var vertexLinkage = {};
-function Vertex(x, y, z) {
-  this.position = vec3.createFrom(x, y, z);
-  var key = this.key();
-  if (!vertexLinkage[key]) {
-    this.id = id++;
-    this.links = [];
-    this.linkIds = {};
-    vertexLinkage[key] = this;
-  }
-
-  return vertexLinkage[key];
-}
-
-var near = function(a, b) {
-  return Math.abs(a-b) <= 0.000000000001;
-}
-
-Vertex.prototype = {
-  key : function() {
-    return Array.prototype.join.call(this.position, ',');
-  },
-  addLink : function(vertex) {
-    if (!this.linkIds[vertex.id]) {
-      this.links.push(vertex);
-      this.linkIds[vertex.id] = true;
-    }
-    return this;
-  },
-  test : function(plane, skipIds) {
-    skipIds = Object.create(skipIds);
-    var intersections = [];
-    for (var i = 0; i<this.links.length; i++) {
-      // avoid recursing forever
-      if (skipIds[this.links[i].id]) {
-        continue;
-      }
-
-      var ab = vec3.subtract(this.links[i].position, this.position, vec3.createFrom(0, 0, 0));
-      var t = plane.d - vec3.dot(plane.n, this.position, vec3.createFrom(0,0,0))
-      var dot = vec3.dot(plane.n, ab, vec3.createFrom(0,0,0)) ;
-      t /= dot;
-
-      if (near(t, 0) || (t > 0 && t <= 1.0) || (Math.abs(t) === Infinity && plane.position[0] === this.position[0])) {
-
-        if (Math.abs(t) === Infinity) {
-          console.log('PLANE POS', plane.position[0], this.position[0])
-          intersections.push({
-            position: this.position,
-            a: this.id,
-            b: this.links[i].id
-          });
-        } else {
-          intersections.push({
-              position: vec3.add(
-                  this.position,
-                  vec3.multiply(
-                      vec3.createFrom(t,t,t), ab, vec3.createFrom(0,0,0)
-                  ),
-                  vec3.createFrom(0,0,0)
-              ),
-              a: this.id,
-              b: this.links[i].id
-          });
-        }
-
-        // Also attempt to collect any intersections on the other side of this edge
-        skipIds[this.links[i].id] = true;
-        skipIds[this.id] = true;
-        var results = this.links[i].test(plane, skipIds);
-
-        if (results && results.length > 0) {
-          if (this.id === 548 && this.links[i].id === 546) {
-            //debugger;
-          }
-          Array.prototype.push.apply(intersections, results);
-        }
-
-      }
-    }
-    return intersections;
-  }
-};
-
-var verts = [];
+var verts = [], sliceZ = Infinity;
 for (var i = 0; i<model.length; i+=9) {
+
+  if (model[i+2] < sliceZ) {
+    sliceZ = model[i+2];
+  }
+
+  if (model[i+5] < sliceZ) {
+    sliceZ = model[i+5];
+  }
+
+  if (model[i+8] < sliceZ) {
+    sliceZ = model[i+8];
+  }
+
   var a = new Vertex(model[i], model[i+1], model[i+2]);
   var b = new Vertex(model[i+3], model[i+4], model[i+5]);
   var c = new Vertex(model[i+6], model[i+7], model[i+8]);
@@ -102,10 +30,6 @@ for (var i = 0; i<model.length; i+=9) {
   verts.push(b);
   verts.push(c);
 }
-
-
-var sliceZ = 0;
-
 
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
@@ -150,131 +74,113 @@ var tick = function() {
     }
   }
 
+  if (!intersectionGroups.length) {
+    return console.log('DONE');
+  }
+
+  ctx.save();
+  ctx.translate(300, 300);
 
   ctx.strokeStyle = "orange";
   ctx.moveTo(intersectionGroups[0][0].position[0], intersectionGroups[0][0].position[1]);
 
-  var isLeft = function(p1, p2, p3) {
-    return (p2.position[0] - p1.position[0])*(p3.position[1] - p1.position[1]) - (p3.position[0] - p1.position[0])*(p2.position[1] - p1.position[1]);
-  };
-
-  // chainHull_2D(): Andrew's monotone chain 2D convex hull algorithm
-  // see: http://en.wikibooks.org/wiki/Algorithm_Implementation/Geometry/Convex_hull/Monotone_chain
-  //     Input:  P[] = an array of 2D points
-  //                   presorted by increasing x- and y-coordinates
-  //             n = the number of points in P[]
-  //     Output: H[] = an array of the convex hull vertices (max is n)
-  //     Return: the number of points in H[]
-  function chainHull_2D(P)
-  {
-      var H = [];
-      // the output array H[] will be used as the stack
-      var    bot=0, top=(-1);  // indices for bottom and top of the stack
-      var    i;                // array scan index
-      var n = P.length;
-      // Get the indices of points with min x-coord and min|max y-coord
-      var minmin = 0, minmax;
-      var xmin = P[0].position[0];
-      for (i=1; i<n; i++)
-          if (P[i].position[0] !== xmin) break;
-      minmax = i-1;
-      if (minmax === n-1) {       // degenerate case: all x-coords == xmin
-          H[++top] = P[minmin];
-          if (P[minmax].position[1] !== P[minmin].position[1]) // a nontrivial segment
-              H[++top] = P[minmax];
-          H[++top] = P[minmin];           // add polygon endpoint
-          return H;
-      }
-
-      // Get the indices of points with max x-coord and min|max y-coord
-      var maxmin, maxmax = n-1;
-      var xmax = P[n-1].position[0];
-      for (i=n-2; i>=0; i--)
-          if (P[i].position[0] !== xmax) break;
-      maxmin = i+1;
-
-      // Compute the lower hull on the stack H
-      H[++top] = P[minmin];      // push minmin point onto stack
-      i = minmax;
-      while (++i <= maxmin)
-      {
-          // the lower line joins P[minmin] with P[maxmin]
-          if (isLeft( P[minmin], P[maxmin], P[i]) >= 0 && i < maxmin)
-              continue;          // ignore P[i] above or on the lower line
-
-          while (top > 0)        // there are at least 2 points on the stack
-          {
-              // test if P[i] is left of the line at the stack top
-              if (isLeft( H[top-1], H[top], P[i]) > 0)
-                  break;         // P[i] is a new hull vertex
-              else
-                  top--;         // pop top point off stack
-          }
-          H[++top] = P[i];       // push P[i] onto stack
-      }
-
-      // Next, compute the upper hull on the stack H above the bottom hull
-      if (maxmax !== maxmin)      // if distinct xmax points
-          H[++top] = P[maxmax];  // push maxmax point onto stack
-      bot = top;                 // the bottom point of the upper hull stack
-      i = maxmin;
-      while (--i >= minmax)
-      {
-          // the upper line joins P[maxmax] with P[minmax]
-          if (isLeft( P[maxmax], P[minmax], P[i]) >= 0 && i > minmax)
-              continue;          // ignore P[i] below or on the upper line
-
-          while (top > bot)    // at least 2 points on the upper stack
-          {
-              // test if P[i] is left of the line at the stack top
-              if (isLeft( H[top-1], H[top], P[i]) > 0)
-                  break;         // P[i] is a new hull vertex
-              else
-                  top--;         // pop top point off stack
-          }
-          H[++top] = P[i];       // push P[i] onto stack
-      }
-      if (minmax !== minmin)
-          H[++top] = P[minmin];  // push joining endpoint onto stack
-
-      return H;
-  }
-
-
-
-  intersectionGroups.forEach(function(group, groupId) {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = ctx.fillStyle = "rgba(255, 105, 0, 1)";
-    ctx.beginPath();
+  var hulls = intersectionGroups.map(function(group, groupId) {
 
     // calculate the convex hull
     group.sort(function(a, b) {
       return b.position[0] - a.position[0] + b.position[1] - a.position[1];
     });
 
-
-    var convexHull = chainHull_2D(group);
-
-    convexHull.forEach(function(vert) {
-      ctx.lineTo(300 + (vert.position[0] * 300), 300  + (vert.position[1] * 300));
+    var convexHull = chainHull_2D(group).map(function(point) {
+      return Vec2.fromArray([point.position[0]*300, point.position[1]*300]);
     });
 
-    // return to the origin
-    ctx.lineTo(300 + (group[0].position[0] * 300), 300  + (group[0].position[1] * 300));
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = ctx.fillStyle = "#FD871F";
+    ctx.beginPath();
+      convexHull.forEach(function(vert) {
+        ctx.lineTo(vert.x, vert.y);
+      });
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
 
+    return convexHull;
   });
 
-  sliceZ+=.005;
+  offsetHulls(hulls)
+
+
+  sliceZ+=.001;
+  ctx.restore();
   requestAnimationFrame(tick);
 };
+
+function offsetHulls(hulls) {
+  var result = null;
+  for (var i = 10; i<100; i+=10) {
+    for (var j = 0; j<hulls.length; j++) {
+
+      var paths = hulls[j].map(function(vert) {
+        return { X: vert.x, Y: vert.y };
+      });
+
+
+      offsetted_paths = offsetHull([paths], i)
+      if (!result) {
+        result = offsetted_paths;
+      } else {
+        result = union(offsetted_paths, result);
+      }
+    }
+
+    if (result && result.length) {
+      result.forEach(function(r) {
+        ctx.beginPath();
+          ctx.moveTo(r[0].X, r[0].Y)
+          r.forEach(function(point) {
+            ctx.lineTo(point.X, point.Y);
+          });
+          ctx.closePath();
+          ctx.lineWidth = 1;
+          ctx.fillStyle = ctx.strokeStyle = "#2784FF"
+        ctx.stroke();
+      });
+    }
+  }
+}
+
+function union(a, b) {
+  var cpr = new ClipperLib.Clipper();
+  cpr.AddPaths(a, ClipperLib.PolyType.ptSubject, true);
+  cpr.AddPaths(b, ClipperLib.PolyType.ptClip, true);
+
+  var ret = new ClipperLib.Paths();
+
+  cpr.Execute(
+    ClipperLib.ClipType.ctUnion,
+    ret,
+    ClipperLib.PolyFillType.pftNonZero,
+    ClipperLib.PolyFillType.pftNonZero
+  );
+
+  return ret;
+}
+
+function offsetHull(paths, offset) {
+  var co = new ClipperLib.ClipperOffset(2, 0.25);
+  // // ClipperLib.EndType = {etOpenSquare: 0, etOpenRound: 1, etOpenButt: 2, etClosedPolygon: 3, etClosedLine : 4 };
+  co.AddPaths(paths,
+    ClipperLib.JoinType.jtRound,
+    ClipperLib.EndType.etClosedPolygon
+  );
+
+  var offsetted_paths = new ClipperLib.Paths();
+  co.Execute(offsetted_paths, offset);
+  return offsetted_paths;
+}
 
 tick();
 // TODO: identify holes
 // TODO: cleanup the skipIds nonsense
-
-
-
-
