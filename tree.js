@@ -1,19 +1,28 @@
 function debug(a) {
   console.log(JSON.stringify(a, null, '  '))
 }
+var finite = function(a) {
+  return Math.abs(a) !== Infinity;
+};
 
-var verts = [], sliceZ = Infinity;
+var validnum = function(a) {
+  return finite(a) && !isNaN(a);
+};
+
+ClipperLib.Error = function(msg) { console.error(msg) };
+
+var verts = [], sliceZ = -Infinity;
 for (var i = 0; i<model.length; i+=9) {
 
-  if (model[i+2] < sliceZ) {
+  if (model[i+2] > sliceZ) {
     sliceZ = model[i+2];
   }
 
-  if (model[i+5] < sliceZ) {
+  if (model[i+5] > sliceZ) {
     sliceZ = model[i+5];
   }
 
-  if (model[i+8] < sliceZ) {
+  if (model[i+8] > sliceZ) {
     sliceZ = model[i+8];
   }
 
@@ -33,107 +42,169 @@ for (var i = 0; i<model.length; i+=9) {
 
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
-
-var tick = function() {
+sliceZ -= .0001
+var tick = function(stop) {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   var zPlane = {
-    n : vec3.cross(
-          vec3.subtract(
-            vec3.createFrom(1, -6, sliceZ),
-            vec3.createFrom(-4, 2, sliceZ), {}
-          ),
-          vec3.subtract(
-            vec3.createFrom(-2, 4, sliceZ),
-            vec3.createFrom(-4, 2, sliceZ), {}
-          ),
-          {}
-        ),
-    position : vec3.createFrom(0,0,sliceZ)
+    position : vec3.createFrom(0,0,sliceZ),
+    v1 : vec3.createFrom(2, 0, sliceZ),
+    v2 : vec3.createFrom(0, 2, sliceZ)
   };
 
-  zPlane.d = vec3.dot(zPlane.n, vec3.createFrom(-4, 2, sliceZ));
+  zPlane.n = vec3.cross(
+    vec3.subtract(
+      zPlane.v1,
+      zPlane.position,
+      vec3.createFrom(0, 0, 0)
+    ),
+    vec3.subtract(
+      zPlane.v2,
+      zPlane.position,
+      vec3.createFrom(0, 0, 0)
+    ),
+    vec3.createFrom(0, 0, 0)
+  );
 
   var collided = {}, seen = {}, intersectionGroups = [];
   for (var i = 0; i<verts.length; i++) {
+    verts[i].seen = false;
+  }
+
+  for (var i = 0; i<verts.length; i++) {
+
     var vert = verts[i];
-    if (!seen[vert.id]) {
-      seen[vert.id] = true;
+    if (!vert.seen) {
 
-      var intersect = vert.test(zPlane, {});
+      var intersect = vert.test(zPlane);
       if (intersect && intersect.length > 0) {
-        intersect.forEach(function(obj, group) {
-          seen[obj.a] = true;
-          seen[obj.b] = true;
-        });
-
         intersectionGroups.push(intersect);
       }
-
     }
   }
+
+
+  console.log('found %d intersections; lengths:', intersectionGroups.length)
+  intersectionGroups.map(function(i) {
+    console.log('   ', i.length);
+  });
 
   if (!intersectionGroups.length) {
     return console.log('DONE');
   }
 
   ctx.save();
-  ctx.translate(300, 300);
-
+  ctx.translate(400, 300);
+  ctx.scale(4, 4);
+  var scale = 10;
   ctx.strokeStyle = "orange";
-  ctx.moveTo(intersectionGroups[0][0].position[0], intersectionGroups[0][0].position[1]);
+  ctx.moveTo(
+    intersectionGroups[0][0].position[0],
+    intersectionGroups[0][0].position[1]
+  );
+
 
   var hulls = intersectionGroups.map(function(group, groupId) {
 
-    // calculate the convex hull
-    group.sort(function(a, b) {
-      return b.position[0] - a.position[0] + b.position[1] - a.position[1];
-    });
+    // var convexHull = chainHull_2D(group).map(function(point) {
+    var hull = group.map(function(point) {
+      return Vec2.fromArray([point.position[0]*scale, point.position[1]*scale]);
+    }).filter(Boolean);
 
-    var convexHull = chainHull_2D(group).map(function(point) {
-      return Vec2.fromArray([point.position[0]*300, point.position[1]*300]);
-    });
-
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = ctx.fillStyle = "#FD871F";
-    ctx.beginPath();
-      convexHull.forEach(function(vert) {
-        ctx.lineTo(vert.x, vert.y);
-      });
-    ctx.closePath();
-    ctx.stroke();
-    ctx.fill();
-
-    return convexHull;
+    return Polygon(hull).clean().rewind(true);
   });
 
-  offsetHulls(hulls)
+  hulls.sort(function(a, b) {
 
+    return (a.area() > b.area()) ? -1 : 1;
+  });
 
-  sliceZ+=.001;
+  hulls.map(function(h) {
+    var h = hulls[2];
+    console.log('hull length', h.points.length);
+    if (h.points.length) {
+      console.log(h.area());
+      ctx.beginPath();
+        ctx.moveTo(h.point(0).x, h.point(0).y);
+
+        h.each(function(p, c) {
+          console.log(c.x, c.y)
+          ctx.lineTo(c.x, c.y);
+        });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
+    }
+  });
+  return;
+
+  var holes = 0;
+  ctx.beginPath();
+
+  for (var i = 0; i<hulls.length; i++) {
+    var subject = hulls[i];
+
+    subject.isHole = false
+    var area = subject.area();
+
+    for (var j = 0; j < i; j++) {
+      if (i === j || hulls[j].area() < area) {
+        continue;
+      }
+
+      subject.isHole = hulls[j].containsPolygon(subject);
+      break;
+    }
+
+    ctx.lineWidth = .25;
+    ctx.strokeStyle = ctx.fillStyle = "#FD871F";
+    var points = subject.rewind(!subject.isHole);
+    if (points && points.length) {
+      ctx.moveTo(subject.point(0).x, subject.point(0).y)
+      subject.each(function(c) {
+        ctx.lineTo(c.x, c.y);
+      });
+    }
+  }
+
+  ctx.closePath();
+  ctx.stroke();
+  //ctx.fill();
+
+  //offsetHulls(hulls);
+
+  sliceZ-=.001;
   ctx.restore();
-  requestAnimationFrame(tick);
+  !stop && setTimeout(function() {
+    tick(true);
+  }, 1000);
+  //requestAnimationFrame(tick);
 };
 
 function offsetHulls(hulls) {
   var result = null;
-  for (var i = 10; i<100; i+=10) {
+  var amount = 5;
+  for (var i = amount; i<10; i+=amount) {
     for (var j = 0; j<hulls.length; j++) {
 
-      var paths = hulls[j].map(function(vert) {
+      var paths = hulls[j].points.map(function(vert) {
         return { X: vert.x, Y: vert.y };
       });
 
+      var offsetPaths = offsetHull([paths], hulls[j].isHole ? -i : i);
 
-      offsetted_paths = offsetHull([paths], i)
       if (!result) {
-        result = offsetted_paths;
+        result = offsetPaths;
+      } else if (!hulls[j].isHole) {
+        result = union(offsetPaths, result);
       } else {
-        result = union(offsetted_paths, result);
+        result = xor(offsetPaths, result);
       }
-    }
+
+      result = ClipperLib.JS.Clean(result, 0.25);
 
     if (result && result.length) {
       result.forEach(function(r) {
@@ -148,7 +219,9 @@ function offsetHulls(hulls) {
         ctx.stroke();
       });
     }
+    }
   }
+  return result;
 }
 
 function union(a, b) {
@@ -168,16 +241,45 @@ function union(a, b) {
   return ret;
 }
 
+function xor(a, b) {
+  var cpr = new ClipperLib.Clipper();
+  cpr.AddPaths(a, ClipperLib.PolyType.ptSubject, true);
+  cpr.AddPaths(b, ClipperLib.PolyType.ptClip, true);
+
+  var ret = new ClipperLib.Paths();
+
+  cpr.Execute(
+    ClipperLib.ClipType.ctXor,
+    ret,
+    ClipperLib.PolyFillType.pftNonZero,
+    ClipperLib.PolyFillType.pftNonZero
+  );
+
+  return ret;
+}
+
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(2, 0.25);
-  // // ClipperLib.EndType = {etOpenSquare: 0, etOpenRound: 1, etOpenButt: 2, etClosedPolygon: 3, etClosedLine : 4 };
+  var co = new ClipperLib.ClipperOffset(0, .1);
+
+  var scale = 1000;
+  ClipperLib.JS.ScaleUpPaths(paths, scale);
+
   co.AddPaths(paths,
-    ClipperLib.JoinType.jtRound,
+    ClipperLib.JoinType.jtMiter,
     ClipperLib.EndType.etClosedPolygon
   );
 
   var offsetted_paths = new ClipperLib.Paths();
-  co.Execute(offsetted_paths, offset);
+  co.Execute(offsetted_paths, offset * scale);
+
+  offsetted_paths = offsetted_paths.map(function(path) {
+    return path.map(function(point) {
+      Vec2.clean(point.X /= scale);
+      Vec2.clean(point.Y /= scale);
+      return point;
+    });
+  });
+
   return offsetted_paths;
 }
 

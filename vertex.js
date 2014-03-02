@@ -1,5 +1,15 @@
 var id = 0;
 var vertexLinkage = {};
+var near = function(a, b) {
+  return Math.abs(a-b) <= 0.000000000001;
+}
+
+function Intersection(isect, a, b) {
+  this.position = isect;
+  this.a = a;
+  this.b = b;
+}
+
 function Vertex(x, y, z) {
   this.position = vec3.createFrom(x, y, z);
   var key = this.key();
@@ -13,8 +23,41 @@ function Vertex(x, y, z) {
   return vertexLinkage[key];
 }
 
-var near = function(a, b) {
-  return Math.abs(a-b) <= 0.000000000001;
+function planeline(plane, start, end) {
+  var num = vec3.dot(
+    plane.n,
+    vec3.subtract(
+      plane.position,
+      start.position,
+      vec3.createFrom(0, 0, 0)
+    ),
+    vec3.createFrom(0, 0, 0)
+  );
+
+  var line = vec3.subtract(
+    end.position,
+    start.position,
+    vec3.createFrom(0, 0, 0)
+  );
+
+  var den = vec3.dot(
+    plane.n,
+    line,
+    vec3.createFrom(0, 0, 0)
+  );
+
+  var res = num/den;
+  if (0 <= res && res <= 1.0) {
+    return vec3.add(
+      start.position,
+      vec3.multiply(
+        line,
+        vec3.createFrom(res, res, res),
+        vec3.createFrom(0,0,0)
+      ),
+      vec3.createFrom(0,0,0)
+    );
+  }
 }
 
 Vertex.prototype = {
@@ -28,53 +71,61 @@ Vertex.prototype = {
     }
     return this;
   },
-  test : function(plane, skipIds) {
-    skipIds = Object.create(skipIds);
-    var intersections = [];
+
+
+  test : function(plane, intersections) {
+    if (this.seen) {
+      return intersections;
+    }
+
+    this.seen = true;
+
+    intersections = intersections || [];
     for (var i = 0; i<this.links.length; i++) {
+      var link = this.links[i];
+
       // avoid recursing forever
-      if (skipIds[this.links[i].id]) {
+      if (link.seen) {
+        //console.log('skip');
         continue;
       }
 
-      var ab = vec3.subtract(this.links[i].position, this.position, vec3.createFrom(0, 0, 0));
-      var t = plane.d - vec3.dot(plane.n, this.position, vec3.createFrom(0,0,0))
-      var dot = vec3.dot(plane.n, ab, vec3.createFrom(0,0,0)) ;
-      t /= dot;
+      var sliceZ = plane.position[2];
+      // skip cases that are obviously out of range
+      if (
+        (link.position[2] > sliceZ && this.position[2] > sliceZ) ||
+        (link.position[2] < sliceZ && this.position[2] < sliceZ)
+      ) {
+        //console.log('out of range');
+        //link.seen = true;
+        continue;
+      } else if (link.position[2] === sliceZ) {
+        continue;
+        intersections.push(new Intersection(
+          link.position,
+          link,
+          this
+        ));
+      } else if (this.position[2] === sliceZ) {
+        continue;
+        intersections.push(new Intersection(
+          this.position,
+          this,
+          link
+        ));
+      } else {
 
-      if (near(t, 0) || (t > 0 && t <= 1.0) || (Math.abs(t) === Infinity && plane.position[0] === this.position[0])) {
-
-        if (Math.abs(t) === Infinity) {
-          console.log('PLANE POS', plane.position[0], this.position[0])
-          intersections.push({
-            position: this.position,
-            a: this.id,
-            b: this.links[i].id
-          });
-        } else {
-          intersections.push({
-              position: vec3.add(
-                  this.position,
-                  vec3.multiply(
-                      vec3.createFrom(t,t,t), ab, vec3.createFrom(0,0,0)
-                  ),
-                  vec3.createFrom(0,0,0)
-              ),
-              a: this.id,
-              b: this.links[i].id
-          });
+        var isect = planeline(plane, this, link)
+        if (isect) {
+          intersections.push(new Intersection(
+            isect,
+            this,
+            link
+          ));
         }
-
-        // Also attempt to collect any intersections on the other side of this edge
-        skipIds[this.links[i].id] = true;
-        skipIds[this.id] = true;
-        var results = this.links[i].test(plane, skipIds);
-
-        if (results && results.length > 0) {
-          Array.prototype.push.apply(intersections, results);
-        }
-
       }
+
+      link.test(plane, intersections)
     }
     return intersections;
   }
