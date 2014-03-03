@@ -298,7 +298,7 @@ function renderClipperGroup(r) {
       ctx.lineTo(r[i].X, r[i].Y);
     }
     ctx.closePath();
-    ctx.lineWidth = .1;
+    ctx.lineWidth = .25;
     ctx.fillStyle = ctx.strokeStyle = "#2784FF"
   ctx.stroke();
 }
@@ -339,28 +339,24 @@ function xor(a, b) {
 }
 
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(.1, .1);
+  var co = new ClipperLib.ClipperOffset(100, .1);
 
-  var scale = 10000;
+
+
+  var scale = 100000;
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
-    ClipperLib.JoinType.jtMiter,
+    ClipperLib.JoinType.jtRound,
     ClipperLib.EndType.etClosedPolygon
   );
 
-  var offsetted_paths = new ClipperLib.Paths();
-  co.Execute(offsetted_paths, offset * scale);
+  var result = new ClipperLib.Paths();
+  co.Execute(result, offset * scale);
 
-  offsetted_paths = offsetted_paths.map(function(path) {
-    return path.map(function(point) {
-      Vec2.clean(point.X /= scale);
-      Vec2.clean(point.Y /= scale);
-      return point;
-    });
-  });
+  ClipperLib.JS.ScaleDownPaths(result, scale)
 
-  return offsetted_paths;
+  return result;
 }
 
 tick();
