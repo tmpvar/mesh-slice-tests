@@ -1,3 +1,5 @@
+// TODO: depending on the operation, sorts need to be reversed
+
 function debug(a) {
   console.log(JSON.stringify(a, null, '  '))
 }
@@ -11,88 +13,162 @@ var validnum = function(a) {
 
 ClipperLib.Error = function(msg) { console.error(msg) };
 
-var verts = [], sliceZ = -Infinity;
-for (var i = 0; i<model.length; i+=9) {
-
-  if (model[i+2] > sliceZ) {
-    sliceZ = model[i+2];
-  }
-
-  if (model[i+5] > sliceZ) {
-    sliceZ = model[i+5];
-  }
-
-  if (model[i+8] > sliceZ) {
-    sliceZ = model[i+8];
-  }
-
-  var a = new Vertex(model[i], model[i+1], model[i+2]);
-  var b = new Vertex(model[i+3], model[i+4], model[i+5]);
-  var c = new Vertex(model[i+6], model[i+7], model[i+8]);
-
-  // Setup Linkages
-  a.addLink(b).addLink(c);
-  b.addLink(a).addLink(c);
-  c.addLink(a).addLink(b);
-
-  verts.push(a);
-  verts.push(b);
-  verts.push(c);
-}
-
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
-sliceZ -= .0001
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+///
+//  STL PROCESSING
+///
+
+var triangles = [], sliceZ = -Infinity, seenVerts = {};
+
+// only create unique vertices
+var upsertVert = function(coords, normal) {
+  var key = Vertex.toString(coords);
+
+  if (!seenVerts[key]) {
+    seenVerts[key] = new Vertex(coords[0], coords[1], coords[2]);
+
+    // lets also track the top of the object
+    if (coords[2] > sliceZ) {
+      sliceZ = coords[2];
+    }
+  }
+
+  return seenVerts[key];
+};
+
+
+var sortedVertices = [], sharedTriangles = {};
+for (var i = 0; i<model.length; i++) {
+  var facet = model[i];
+
+  var a = upsertVert(facet.verts[0]);
+  var b = upsertVert(facet.verts[1]);
+  var c = upsertVert(facet.verts[2]);
+
+
+  var triangle = new Triangle(a, b, c, facet.normal);
+
+  [a, b, c].forEach(function(vertex) {
+    if (!sharedTriangles[vertex.id]) {
+      sharedTriangles[vertex.id] = [];
+    }
+
+    sharedTriangles[vertex.id].push(triangle);
+  });
+
+  triangles.push(triangle);
+}
+
+
+var groups = [], group = [];
+var plane = new ZPlane(sliceZ)
+
+var sharedTri = function(a, b, ignore) {
+  var aa = sharedTriangles[a.id];
+  var ab = sharedTriangles[b.id];
+
+  for (var i = 0; i<aa.length; i++) {
+    for (var j = 0; j<ab.length; j++) {
+      if (aa[i].id === ab[j].id && ignore.indexOf(ab[j].id) === -1) {
+        return aa[i];
+      }
+    }
+  }
+
+  return false;
+}
+
+var startTri = null, seenTriangles = {};
+var recurse = function(tri, last) {
+
+  group = [];
+  while (tri) {
+
+    if (seenTriangles[tri.id]) {
+      break;
+    }
+
+    seenTriangles[tri.id] = true;
+
+    var isects = [[0,1], [0, 2], [1, 2]].map(function(a) {
+
+      var isect = plane.intersect(tri.verts[a[0]], tri.verts[a[1]])
+      if (isect) {
+        // var vert = new Vertex(isect[0], isect[1], isect[2]);
+        var vert = upsertVert(isect);
+        vert.shared = a;
+        return vert;
+      }
+    }).filter(Boolean);
+
+    if (isects.length === 3) {
+      console.log('PARALLEL',
+        sharedTriangles[tri.verts[0].id].length,
+        sharedTriangles[tri.verts[1].id].length,
+        sharedTriangles[tri.verts[2].id].length
+      );
+      break;
+    } else if (isects.length === 2) {
+      group.push(isects[0]);
+      group.push(isects[1]);
+
+      var shared = sharedTri(
+        tri.verts[isects[0].shared[0]],
+        tri.verts[isects[0].shared[1]],
+        [tri.id, last, startTri]
+      );
+
+      if (!shared) {
+        shared = sharedTri(
+          tri.verts[isects[1].shared[0]],
+          tri.verts[isects[1].shared[1]],
+          [tri.id, last, startTri]
+        );
+      }
+
+      if (shared && shared.id !== tri.id && shared.id !== startTri) {
+        last = tri.id;
+        tri = shared;
+      } else {
+        if (group.length > 0) {
+          groups.push(group);
+          group = [];
+        }
+
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+}
+
 var tick = function(stop) {
+  console.log('TICK')
+  var l = triangles.length;
+  groups.length = 0;
+  group.length = 0;
+  seenTriangles = {};
+
+  while (l--) {
+    startTri = triangles[l].id;
+    if (!seenTriangles[startTri]) {
+      recurse(triangles[l]);
+    }
+  }
+
+  console.log('done; group count:', groups.length);
+
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  var zPlane = {
-    position : vec3.createFrom(0,0,sliceZ),
-    v1 : vec3.createFrom(2, 0, sliceZ),
-    v2 : vec3.createFrom(0, 2, sliceZ)
-  };
-
-  zPlane.n = vec3.cross(
-    vec3.subtract(
-      zPlane.v1,
-      zPlane.position,
-      vec3.createFrom(0, 0, 0)
-    ),
-    vec3.subtract(
-      zPlane.v2,
-      zPlane.position,
-      vec3.createFrom(0, 0, 0)
-    ),
-    vec3.createFrom(0, 0, 0)
-  );
-
-  var collided = {}, seen = {}, intersectionGroups = [];
-  for (var i = 0; i<verts.length; i++) {
-    verts[i].seen = false;
-  }
-
-  for (var i = 0; i<verts.length; i++) {
-
-    var vert = verts[i];
-    if (!vert.seen) {
-
-      var intersect = vert.test(zPlane);
-      if (intersect && intersect.length > 0) {
-        intersectionGroups.push(intersect);
-      }
-    }
-  }
-
-
-  console.log('found %d intersections; lengths:', intersectionGroups.length)
-  intersectionGroups.map(function(i) {
-    console.log('   ', i.length);
-  });
-
-  if (!intersectionGroups.length) {
+  if (!groups.length) {
     return console.log('DONE');
   }
 
@@ -100,51 +176,48 @@ var tick = function(stop) {
   ctx.translate(400, 300);
   ctx.scale(4, 4);
   var scale = 10;
-  ctx.strokeStyle = "orange";
-  ctx.moveTo(
-    intersectionGroups[0][0].position[0],
-    intersectionGroups[0][0].position[1]
-  );
 
+  var vecNear = function(a, b, threshold) {
+    return vec3.dist(a.position, b.position) < (threshold || 10)
+  }
 
-  var hulls = intersectionGroups.map(function(group, groupId) {
+  var hulls = groups.map(function(group, groupId) {
+    var last = null, seen = {};
 
-    // var convexHull = chainHull_2D(group).map(function(point) {
     var hull = group.map(function(point) {
       return Vec2.fromArray([point.position[0]*scale, point.position[1]*scale]);
-    }).filter(Boolean);
+    });
 
-    return Polygon(hull).clean().rewind(true);
+    var poly = Polygon(hull).dedupe();
+
+    if (poly.area() < 0) {
+      poly.rewind(true);
+    }
+
+    return poly;
   });
+
+  // console.log('found %d intersections; lengths:', intersectionGroups.length)
+  // hulls.map(function(i) {
+  //   console.log('   ', i.length);
+  //   i.each(function(v) {
+  //     ctx.beginPath();
+  //       ctx.arc(v.x, v.y, 2, Math.PI*2, false);
+  //     ctx.closePath();
+  //     ctx.fillStyle = "rgba(255, 255, 255, .1)";
+  //     ctx.fill();
+  //   })
+  // });
 
   hulls.sort(function(a, b) {
-
     return (a.area() > b.area()) ? -1 : 1;
   });
-
-  hulls.map(function(h) {
-    var h = hulls[2];
-    console.log('hull length', h.points.length);
-    if (h.points.length) {
-      console.log(h.area());
-      ctx.beginPath();
-        ctx.moveTo(h.point(0).x, h.point(0).y);
-
-        h.each(function(p, c) {
-          console.log(c.x, c.y)
-          ctx.lineTo(c.x, c.y);
-        });
-      ctx.closePath();
-      ctx.stroke();
-      ctx.fill();
-    }
-  });
-  return;
 
   var holes = 0;
   ctx.beginPath();
 
   for (var i = 0; i<hulls.length; i++) {
+
     var subject = hulls[i];
 
     subject.isHole = false
@@ -159,29 +232,35 @@ var tick = function(stop) {
       break;
     }
 
-    ctx.lineWidth = .25;
-    ctx.strokeStyle = ctx.fillStyle = "#FD871F";
     var points = subject.rewind(!subject.isHole);
     if (points && points.length) {
+
+
+      // ctx.moveTo(subject.point(0).x, subject.point(0).y)
+      // ctx.arc(subject.point(0).x, subject.point(0).y, 3, Math.PI*2, false);
+
       ctx.moveTo(subject.point(0).x, subject.point(0).y)
       subject.each(function(c) {
         ctx.lineTo(c.x, c.y);
       });
+      ctx.lineTo(subject.point(0).x, subject.point(0).y)
     }
   }
 
   ctx.closePath();
+  ctx.lineWidth = .25;
+  ctx.strokeStyle = "#FD871F"
+  ctx.fillStyle = "rgba(250, 220, 150, .2)";
   ctx.stroke();
-  //ctx.fill();
+  ctx.fill();
 
-  //offsetHulls(hulls);
+  offsetHulls(hulls);
 
-  sliceZ-=.001;
+
+  plane.position[2]-=.01;
   ctx.restore();
-  !stop && setTimeout(function() {
-    tick(true);
-  }, 1000);
-  //requestAnimationFrame(tick);
+
+  requestAnimationFrame(tick);
 };
 
 function offsetHulls(hulls) {
@@ -204,21 +283,21 @@ function offsetHulls(hulls) {
         result = xor(offsetPaths, result);
       }
 
-      result = ClipperLib.JS.Clean(result, 0.25);
+      result = ClipperLib.JS.Clean(result, 0.1);
 
-    if (result && result.length) {
-      result.forEach(function(r) {
-        ctx.beginPath();
-          ctx.moveTo(r[0].X, r[0].Y)
-          r.forEach(function(point) {
-            ctx.lineTo(point.X, point.Y);
-          });
-          ctx.closePath();
-          ctx.lineWidth = 1;
-          ctx.fillStyle = ctx.strokeStyle = "#2784FF"
-        ctx.stroke();
-      });
-    }
+      if (result && result.length) {
+        result.forEach(function(r) {
+          ctx.beginPath();
+            ctx.moveTo(r[0].X, r[0].Y)
+            r.forEach(function(point) {
+              ctx.lineTo(point.X, point.Y);
+            });
+            ctx.closePath();
+            ctx.lineWidth = .1;
+            ctx.fillStyle = ctx.strokeStyle = "#2784FF"
+          ctx.stroke();
+        });
+      }
     }
   }
   return result;
@@ -238,7 +317,7 @@ function union(a, b) {
     ClipperLib.PolyFillType.pftNonZero
   );
 
-  return ret;
+  return ClipperLib.JS.Clean(ret, 0.1);
 }
 
 function xor(a, b) {
@@ -255,13 +334,13 @@ function xor(a, b) {
     ClipperLib.PolyFillType.pftNonZero
   );
 
-  return ret;
+  return ClipperLib.JS.Clean(ret, 0.1);
 }
 
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(0, .1);
+  var co = new ClipperLib.ClipperOffset(.1, .1);
 
-  var scale = 1000;
+  var scale = 10000;
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
@@ -286,3 +365,5 @@ function offsetHull(paths, offset) {
 tick();
 // TODO: identify holes
 // TODO: cleanup the skipIds nonsense
+
+
