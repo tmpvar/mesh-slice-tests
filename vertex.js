@@ -2,9 +2,9 @@ function Vertex(x, y, z) {
   if (x instanceof Float32Array) {
     this.position = x;
   } else if (Array.isArray(x)) {
-    this.position = vec3.createFrom(x[0], x[1], x[2]);
+    this.position = vec3.fromValues(x[0], x[1], x[2]);
   } else {
-    this.position = vec3.createFrom(x, y, z);
+    this.position = vec3.fromValues(x, y, z);
   }
 
   this.id = Vertex.id++;

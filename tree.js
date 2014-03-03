@@ -185,9 +185,10 @@ var tick = function(stop) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
-  ctx.translate(400, 300);
-  ctx.scale(4, 4);
-  var scale = 10;
+  ctx.translate(500, 300);
+  ctx.scale(.5, .5);
+  ctx.lineWidth = 2;
+  var scale = 100;
 
   var hulls = groups.map(function(group, groupId) {
     var last = null, seen = {};
@@ -242,7 +243,7 @@ var tick = function(stop) {
   }
 
   ctx.closePath();
-  ctx.lineWidth = .25;
+
   ctx.strokeStyle = "#FD871F"
   ctx.fillStyle = "rgba(250, 220, 150, .2)";
   ctx.stroke();
@@ -263,8 +264,8 @@ var tick = function(stop) {
 
 function offsetHulls(hulls) {
   var result = null;
-  var amount = 5;
-  for (var i = amount; i<10; i+=amount) {
+  var amount = 20;
+  for (var i = amount; i<200; i+=amount) {
     for (var j = 0; j<hulls.length; j++) {
 
       var paths = hulls[j].points.map(function(vert) {
@@ -298,7 +299,6 @@ function renderClipperGroup(r) {
       ctx.lineTo(r[i].X, r[i].Y);
     }
     ctx.closePath();
-    ctx.lineWidth = .25;
     ctx.fillStyle = ctx.strokeStyle = "#2784FF"
   ctx.stroke();
 }
@@ -318,7 +318,9 @@ function union(a, b) {
     ClipperLib.PolyFillType.pftNonZero
   );
 
-  return ClipperLib.JS.Clean(ret, 0.1);
+  ClipperLib.JS.Lighten(ret, 0.1);
+
+  return ret;
 }
 
 function xor(a, b) {
@@ -335,19 +337,18 @@ function xor(a, b) {
     ClipperLib.PolyFillType.pftNonZero
   );
 
-  return ClipperLib.JS.Clean(ret, 0.1);
+  ClipperLib.JS.Lighten(ret, 0.1);
+  return ret;
 }
 
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(100, .1);
+  var co = new ClipperLib.ClipperOffset(1, 100);
 
-
-
-  var scale = 100000;
+  var scale = 1000;
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
-    ClipperLib.JoinType.jtRound,
+    ClipperLib.JoinType.jtSquare,
     ClipperLib.EndType.etClosedPolygon
   );
 
@@ -360,7 +361,3 @@ function offsetHull(paths, offset) {
 }
 
 tick();
-// TODO: identify holes
-// TODO: cleanup the skipIds nonsense
-
-
