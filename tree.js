@@ -114,7 +114,6 @@ var recurse = function(tri, last) {
       break;
     } else if (isects.length === 2) {
       group.push(isects[0]);
-      group.push(isects[1]);
 
       var shared = sharedTri(
         tri.verts[isects[0].shared[0]],
@@ -177,10 +176,6 @@ var tick = function(stop) {
   ctx.scale(4, 4);
   var scale = 10;
 
-  var vecNear = function(a, b, threshold) {
-    return vec3.dist(a.position, b.position) < (threshold || 10)
-  }
-
   var hulls = groups.map(function(group, groupId) {
     var last = null, seen = {};
 
@@ -188,7 +183,7 @@ var tick = function(stop) {
       return Vec2.fromArray([point.position[0]*scale, point.position[1]*scale]);
     });
 
-    var poly = Polygon(hull).dedupe();
+    var poly = Polygon(hull);
 
     if (poly.area() < 0) {
       poly.rewind(true);
@@ -196,18 +191,6 @@ var tick = function(stop) {
 
     return poly;
   });
-
-  // console.log('found %d intersections; lengths:', intersectionGroups.length)
-  // hulls.map(function(i) {
-  //   console.log('   ', i.length);
-  //   i.each(function(v) {
-  //     ctx.beginPath();
-  //       ctx.arc(v.x, v.y, 2, Math.PI*2, false);
-  //     ctx.closePath();
-  //     ctx.fillStyle = "rgba(255, 255, 255, .1)";
-  //     ctx.fill();
-  //   })
-  // });
 
   hulls.sort(function(a, b) {
     return (a.area() > b.area()) ? -1 : 1;
@@ -234,10 +217,6 @@ var tick = function(stop) {
 
     var points = subject.rewind(!subject.isHole);
     if (points && points.length) {
-
-
-      // ctx.moveTo(subject.point(0).x, subject.point(0).y)
-      // ctx.arc(subject.point(0).x, subject.point(0).y, 3, Math.PI*2, false);
 
       ctx.moveTo(subject.point(0).x, subject.point(0).y)
       subject.each(function(c) {
