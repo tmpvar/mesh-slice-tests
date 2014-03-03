@@ -63,6 +63,9 @@ for (var i = 0; i<model.length; i++) {
   triangles.push(triangle);
 }
 
+triangles.sort(function(a, b) {
+  return (a.verts[0].position[2] < b.verts[0].position[2]) ? -1 : 1;
+});
 
 var groups = [], group = [];
 var plane = new ZPlane(sliceZ)
@@ -162,20 +165,16 @@ var tick = function(stop) {
 
       if (triVerts[0].position[2] >= z) {
         recurse(triangles[l]);
+      } else {
+        break;
       }
     }
   }
-
-  //console.log('done; group count:', groups.length);
 
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  if (!groups.length) {
-    return console.log('DONE');
-  }
 
   ctx.save();
   ctx.translate(400, 300);
@@ -221,14 +220,16 @@ var tick = function(stop) {
       break;
     }
 
-    var points = subject.rewind(!subject.isHole);
+    var points = subject.rewind(!subject.isHole).points;
     if (points && points.length) {
 
-      ctx.moveTo(subject.point(0).x, subject.point(0).y)
-      subject.each(function(c) {
-        ctx.lineTo(c.x, c.y);
-      });
-      ctx.lineTo(subject.point(0).x, subject.point(0).y)
+      ctx.moveTo(points[0].x, points[0].y)
+
+      for (var k = 0; k<points.length; k++) {
+        ctx.lineTo(points[k].x, points[k].y);
+      }
+
+      ctx.lineTo(points[0].x, points[0].y)
     }
   }
 
@@ -241,11 +242,15 @@ var tick = function(stop) {
 
   offsetHulls(hulls);
 
+  plane.position[2] -= .01;
 
-  plane.position[2]-=.01;
   ctx.restore();
-
-  requestAnimationFrame(tick);
+  if (plane.position[2] > .01) {
+    requestAnimationFrame(tick);
+  } else {
+    plane.position[2] = -1;
+    requestAnimationFrame(tick);
+  }
 };
 
 function offsetHulls(hulls) {
