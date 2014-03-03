@@ -96,7 +96,15 @@ function Intersection(isect, a, b) {
 }
 
 function Vertex(x, y, z) {
-  this.position = vec3.createFrom(x, y, z);
+  if (x instanceof Float32Array) {
+    this.position = x;
+  } else if (Array.isArray(x)) {
+    this.position = vec3.createFrom(x[0], x[1], x[2]);
+
+  } else {
+    this.position = vec3.createFrom(x, y, z);
+  }
+
   var key = this.key();
   this.id = Vertex.id++;
 }
@@ -513,8 +521,7 @@ ZPlane.prototype.intersect = function(start, end) {
       this.position,
       start.position,
       vec3.createFrom(0, 0, 0)
-    ),
-    vec3.createFrom(0, 0, 0)
+    )
   );
 
   var line = vec3.subtract(
@@ -523,11 +530,7 @@ ZPlane.prototype.intersect = function(start, end) {
     vec3.createFrom(0, 0, 0)
   );
 
-  var den = vec3.dot(
-    this.n,
-    line,
-    vec3.createFrom(0, 0, 0)
-  );
+  var den = vec3.dot(this.n,line);
 
   var res = num/den;
   if (!isNaN(res) && 0 <= res && res <= 1.0) {

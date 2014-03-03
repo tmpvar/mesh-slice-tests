@@ -29,7 +29,7 @@ var upsertVert = function(coords, normal) {
   var key = Vertex.toString(coords);
 
   if (!seenVerts[key]) {
-    seenVerts[key] = new Vertex(coords[0], coords[1], coords[2]);
+    seenVerts[key] = new Vertex(coords);
 
     // lets also track the top of the object
     if (coords[2] > sliceZ) {
@@ -82,7 +82,7 @@ var sharedTri = function(a, b, ignore) {
   return false;
 }
 
-var startTri = null, seenTriangles = {};
+var startTri = null, seenTriangles = {}, isectTests = [[0,1], [0, 2], [1, 2]];
 var recurse = function(tri, last) {
 
   group = [];
@@ -94,16 +94,17 @@ var recurse = function(tri, last) {
 
     seenTriangles[tri.id] = true;
 
-    var isects = [[0,1], [0, 2], [1, 2]].map(function(a) {
-
-      var isect = plane.intersect(tri.verts[a[0]], tri.verts[a[1]])
+    var isects = [];
+    for (var i=0; i<isectTests.length; i++) {
+      var test = isectTests[i];
+      var isect = plane.intersect(tri.verts[test[0]], tri.verts[test[1]])
       if (isect) {
         // var vert = new Vertex(isect[0], isect[1], isect[2]);
         var vert = upsertVert(isect);
-        vert.shared = a;
-        return vert;
+        vert.shared = test;
+        isects.push(vert);
       }
-    }).filter(Boolean);
+    }
 
     if (isects.length === 3) {
       console.log('PARALLEL',
@@ -147,20 +148,25 @@ var recurse = function(tri, last) {
 }
 
 var tick = function(stop) {
-  console.log('TICK')
+
   var l = triangles.length;
   groups.length = 0;
   group.length = 0;
   seenTriangles = {};
-
+  var z = plane.position[2], triVerts;
   while (l--) {
     startTri = triangles[l].id;
+
     if (!seenTriangles[startTri]) {
-      recurse(triangles[l]);
+      triVerts = triangles[l].verts;
+
+      if (triVerts[0].position[2] >= z) {
+        recurse(triangles[l]);
+      }
     }
   }
 
-  console.log('done; group count:', groups.length);
+  //console.log('done; group count:', groups.length);
 
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -265,22 +271,25 @@ function offsetHulls(hulls) {
       result = ClipperLib.JS.Clean(result, 0.1);
 
       if (result && result.length) {
-        result.forEach(function(r) {
-          ctx.beginPath();
-            ctx.moveTo(r[0].X, r[0].Y)
-            r.forEach(function(point) {
-              ctx.lineTo(point.X, point.Y);
-            });
-            ctx.closePath();
-            ctx.lineWidth = .1;
-            ctx.fillStyle = ctx.strokeStyle = "#2784FF"
-          ctx.stroke();
-        });
+        result.forEach(renderClipperGroup);
       }
     }
   }
   return result;
 }
+
+function renderClipperGroup(r) {
+  ctx.beginPath();
+    ctx.moveTo(r[0].X, r[0].Y)
+    for (var i=0; i<r.length; i++) {
+      ctx.lineTo(r[i].X, r[i].Y);
+    }
+    ctx.closePath();
+    ctx.lineWidth = .1;
+    ctx.fillStyle = ctx.strokeStyle = "#2784FF"
+  ctx.stroke();
+}
+
 
 function union(a, b) {
   var cpr = new ClipperLib.Clipper();
