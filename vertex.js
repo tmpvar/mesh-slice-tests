@@ -23,6 +23,10 @@ Triangle.prototype.sortByZ = function() {
   this.verts.sort(this.sortByZAscending);
 };
 
+Triangle.prototype.toString = function() {
+  return '[' + this.id + ':' + [this.verts[0].id, this.verts[1].id, this.verts[2].id].join(',') + ']';
+}
+
 function Intersection(isect, a, b) {
   this.position = isect;
   this.a = a;

@@ -63,6 +63,14 @@ for (var i = 0; i<model.length; i++) {
   triangles.push(triangle);
 }
 
+var sortShared = function(a, b) {
+  return (a.id > b.id) ? -1 : 1;
+};
+
+Object.keys(sharedTriangles).forEach(function(key) {
+  sharedTriangles[key].sort(sortShared);
+});
+
 triangles.sort(function(a, b) {
   return (a.verts[0].position[2] < b.verts[0].position[2]) ? -1 : 1;
 });
