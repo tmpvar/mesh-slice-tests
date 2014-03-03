@@ -22,161 +22,26 @@ canvas.height = window.innerHeight;
 //  STL PROCESSING
 ///
 
-var triangles = [], sliceZ = -Infinity, seenVerts = {};
+var slicer = new MeshSlicePolygon();
 
-// only create unique vertices
-var upsertVert = function(coords, normal) {
-  var key = Vertex.toString(coords);
-
-  if (!seenVerts[key]) {
-    seenVerts[key] = new Vertex(coords);
-
-    // lets also track the top of the object
-    if (coords[2] > sliceZ) {
-      sliceZ = coords[2];
-    }
-  }
-
-  return seenVerts[key];
-};
-
-
-var sortedVertices = [], sharedTriangles = {};
 for (var i = 0; i<model.length; i++) {
   var facet = model[i];
 
-  var a = upsertVert(facet.verts[0]);
-  var b = upsertVert(facet.verts[1]);
-  var c = upsertVert(facet.verts[2]);
-
-
-  var triangle = new Triangle(a, b, c, facet.normal);
-
-  [a, b, c].forEach(function(vertex) {
-    if (!sharedTriangles[vertex.id]) {
-      sharedTriangles[vertex.id] = [];
-    }
-
-    sharedTriangles[vertex.id].push(triangle);
-  });
-
-  triangles.push(triangle);
+  slicer.addTriangle(
+    model[i].verts[0],
+    model[i].verts[1],
+    model[i].verts[2]
+  );
 }
 
-var sortShared = function(a, b) {
-  return (a.id > b.id) ? -1 : 1;
-};
-
-Object.keys(sharedTriangles).forEach(function(key) {
-  sharedTriangles[key].sort(sortShared);
-});
-
-triangles.sort(function(a, b) {
-  return (a.verts[0].position[2] < b.verts[0].position[2]) ? -1 : 1;
-});
-
-var groups = [], group = [];
-var plane = new ZPlane(sliceZ)
-
-var sharedTri = function(a, b, ignore) {
-  var aa = sharedTriangles[a.id];
-  var ab = sharedTriangles[b.id];
-
-  for (var i = 0; i<aa.length; i++) {
-    for (var j = 0; j<ab.length; j++) {
-      if (aa[i].id === ab[j].id && ignore.indexOf(ab[j].id) === -1) {
-        return aa[i];
-      }
-    }
-  }
-
-  return false;
-}
-
-var startTri = null, seenTriangles = {}, isectTests = [[0,1], [0, 2], [1, 2]];
-var recurse = function(tri, last) {
-
-  group = [];
-  while (tri) {
-
-    if (seenTriangles[tri.id]) {
-      break;
-    }
-
-    seenTriangles[tri.id] = true;
-
-    var isects = [];
-    for (var i=0; i<isectTests.length; i++) {
-      var test = isectTests[i];
-      var isect = plane.intersect(tri.verts[test[0]], tri.verts[test[1]])
-      if (isect) {
-        // var vert = new Vertex(isect[0], isect[1], isect[2]);
-        var vert = upsertVert(isect);
-        vert.shared = test;
-        isects.push(vert);
-      }
-    }
-
-    if (isects.length === 3) {
-      console.log('PARALLEL',
-        sharedTriangles[tri.verts[0].id].length,
-        sharedTriangles[tri.verts[1].id].length,
-        sharedTriangles[tri.verts[2].id].length
-      );
-      break;
-    } else if (isects.length === 2) {
-      group.push(isects[0]);
-
-      var shared = sharedTri(
-        tri.verts[isects[0].shared[0]],
-        tri.verts[isects[0].shared[1]],
-        [tri.id, last, startTri]
-      );
-
-      if (!shared) {
-        shared = sharedTri(
-          tri.verts[isects[1].shared[0]],
-          tri.verts[isects[1].shared[1]],
-          [tri.id, last, startTri]
-        );
-      }
-
-      if (shared && shared.id !== tri.id && shared.id !== startTri) {
-        last = tri.id;
-        tri = shared;
-      } else {
-        if (group.length > 0) {
-          groups.push(group);
-          group = [];
-        }
-
-        break;
-      }
-    } else {
-      break;
-    }
-  }
-}
+var sliceZ = slicer.bounds.max[2]-.0001;
 
 var tick = function(stop) {
 
-  var l = triangles.length;
-  groups.length = 0;
-  group.length = 0;
-  seenTriangles = {};
-  var z = plane.position[2], triVerts;
-  while (l--) {
-    startTri = triangles[l].id;
-
-    if (!seenTriangles[startTri]) {
-      triVerts = triangles[l].verts;
-
-      if (triVerts[0].position[2] >= z) {
-        recurse(triangles[l]);
-      } else {
-        break;
-      }
-    }
+  var groups = slicer.slice(sliceZ);
+  console.log('groups', groups.length, '@', sliceZ);
+  if (!groups.length) {
+    return console.log('DONE');
   }
 
   canvas.width = window.innerWidth;
@@ -251,13 +116,13 @@ var tick = function(stop) {
 
   offsetHulls(hulls);
 
-  plane.position[2] -= .01;
+  sliceZ -= .001;
 
   ctx.restore();
-  if (plane.position[2] > .01) {
+  if (sliceZ > .05) {
     requestAnimationFrame(tick);
   } else {
-    plane.position[2] = -1;
+    sliceZ = -1;
     requestAnimationFrame(tick);
   }
 };
@@ -302,7 +167,6 @@ function renderClipperGroup(r) {
     ctx.fillStyle = ctx.strokeStyle = "#2784FF"
   ctx.stroke();
 }
-
 
 function union(a, b) {
   var cpr = new ClipperLib.Clipper();
