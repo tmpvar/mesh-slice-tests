@@ -39,24 +39,19 @@ for (var i = 0; i<model.length; i++) {
   model[i].verts[2][1] *= modelScale;
   model[i].verts[2][2] *= modelScale;
 
-  slicer.addTriangle(
-    model[i].verts[0],
-    model[i].verts[1],
-    model[i].verts[2]
-  );
+  slicer.addTriangle(model[i].verts);
 }
 
 var sliceZ = slicer.bounds.max[2]-.001;
 
 var tick = function(stop) {
-
+  var start = Date.now();
   var hulls = slicer.slice(sliceZ);
-  console.log('hulls', hulls.length, '@', sliceZ);
+
+  console.log('hulls', hulls.length, '@', sliceZ, 'took', Date.now() - start);
 
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
   ctx.translate(500, 300);
@@ -69,6 +64,7 @@ var tick = function(stop) {
   });
 
   var holes = 0;
+
   ctx.beginPath();
 
   for (var i = 0; i<hulls.length; i++) {
@@ -107,10 +103,11 @@ var tick = function(stop) {
   ctx.stroke();
   ctx.fill();
 
+
   offsetHulls(hulls);
 
   sliceZ -= 1;
-
+  console.log(Date.now() - start);
   ctx.restore();
   if (sliceZ > 1) {
     requestAnimationFrame(tick);
@@ -131,7 +128,13 @@ function offsetHulls(hulls) {
   //  * for holes, if the poly area is < 0 then ignore for this layer
 
   // TODO PERF: the nested map below is eating up the cpu
-  var ignore = {};
+  var ignore = {}, paths = new Array(hulls.length);
+
+  for (var j = 0; j<hulls.length; j++) {
+    paths[j] = hulls[j].points.map(function(vert) {
+      return [vert.x, vert.y];
+    });
+  }
 
   for (var i = amount; i<=200; i+=amount) {
     for (var j = 0; j<hulls.length; j++) {
@@ -140,9 +143,10 @@ function offsetHulls(hulls) {
         continue;
       }
 
-      var path = hulls[j].points.map(function(vert) {
-        return { X: vert.x, Y: vert.y };
-      })
+      var path = new Array(paths[j].length), current = paths[j];
+      for (var k = 0; k < paths[j].length; k++) {
+        path[k] = { X: current[k][0], Y: current[k][1] };
+      }
 
       var offsetPath = offsetHull([path], hulls[j].isHole ? -i : i);
 
@@ -152,6 +156,12 @@ function offsetHulls(hulls) {
       if (!hulls[j].isHole) {
         ignore[j] = true;
       }
+
+      // TODO: if the hull is a hole, and a raytrace into the
+      // original mesh turns up empty, then we can ignore it as well.
+      //
+      // Why? when we are cutting out holes that traverse the depth of
+      //      the model, there is no point in stepping in on every layer.
 
       if (!result) {
         result = offsetPath;
@@ -226,7 +236,7 @@ function offsetHull(paths, offset) {
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
-    ClipperLib.JoinType.jtRound,
+    ClipperLib.JoinType.jtMiter,
     ClipperLib.EndType.etClosedPolygon
   );
 
