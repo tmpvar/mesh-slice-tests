@@ -48,7 +48,7 @@ var tick = function(stop) {
   var start = Date.now();
   var hulls = slicer.slice(sliceZ);
 
-  console.log('hulls', hulls.length, '@', sliceZ, 'took', Date.now() - start);
+  //console.log('hulls', hulls.length, '@', sliceZ, 'took', Date.now() - start);
 
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -71,12 +71,16 @@ var tick = function(stop) {
 
     var subject = hulls[i];
 
+    if (subject.isHole) {
+      continue;
+    }
+
     subject.isHole = false
     var area = subject.area();
 
     for (var j = 0; j < i; j++) {
-      if (i === j || hulls[j].area() < area) {
-        continue;
+      if (hulls[j].area() < area) {
+        break;
       }
 
       subject.isHole = hulls[j].containsPolygon(subject);
@@ -105,9 +109,9 @@ var tick = function(stop) {
 
 
   offsetHulls(hulls);
+  console.log('elapsed', Date.now() - start);
 
   sliceZ -= 1;
-  console.log(Date.now() - start);
   ctx.restore();
   if (sliceZ > 1) {
     requestAnimationFrame(tick);
@@ -119,42 +123,56 @@ var tick = function(stop) {
   }
 };
 
+var clipperScale = 100;
 function offsetHulls(hulls) {
   var result = null;
   var amount = 20;
 
-  // TODO: total number of iterations should be a combination of:
-  //  * steps from aabb to stock aabb
-  //  * for holes, if the poly area is < 0 then ignore for this layer
-
-  // TODO PERF: the nested map below is eating up the cpu
   var ignore = {}, paths = new Array(hulls.length);
-
+  var holeCount = 0;
   for (var j = 0; j<hulls.length; j++) {
-    paths[j] = hulls[j].points.map(function(vert) {
-      return [vert.x, vert.y];
-    });
+    var path = new Array(hulls[j].points.length);
+    var points = hulls[j].points;
+    for (var k = 0; k<points.length; k++) {
+      path[k] = { X: points[k].x*clipperScale, Y: points[k].y*clipperScale };
+    }
+
+    if (!hulls[j].isHole) {
+      var offsetPath = offsetHull([path], amount);
+      if (!result) {
+        result = offsetPath;
+      } else {
+        result = union(offsetPath, result);
+      }
+
+      if (result && result.length) {
+        result.forEach(renderClipperGroup);
+      }
+    } else {
+      paths[j] = path;
+      holeCount++;
+    }
   }
 
-  for (var i = amount; i<=200; i+=amount) {
-    for (var j = 0; j<hulls.length; j++) {
+  var i = 0;
+  while(holeCount) {
+    i+=amount;
+    for (var j = 0; j<paths.length; j++) {
 
-      if (ignore[j]) {
+      if (ignore[j] || !paths[j] || !holeCount) {
         continue;
       }
 
       var path = new Array(paths[j].length), current = paths[j];
       for (var k = 0; k < paths[j].length; k++) {
-        path[k] = { X: current[k][0], Y: current[k][1] };
+        path[k] = { X: current[k].X, Y: current[k].Y };
       }
 
-      var offsetPath = offsetHull([path], hulls[j].isHole ? -i : i);
-
-      // TODO:
-      // This does a single offset around contours.
-      // Definitely something that should be configurable
-      if (!hulls[j].isHole) {
+      var offsetPath = offsetHull([path], -i);
+      if (!offsetPath.length || ClipperLib.JS.AreaOfPolygon(offsetPath[0], 1) <= 0) {
         ignore[j] = true;
+        holeCount--;
+        continue;
       }
 
       // TODO: if the hull is a hole, and a raytrace into the
@@ -165,16 +183,14 @@ function offsetHulls(hulls) {
 
       if (!result) {
         result = offsetPath;
-      } else if (!hulls[j].isHole) {
-        result = union(offsetPath, result);
       } else {
         result = xor(offsetPath, result);
       }
 
       result = ClipperLib.JS.Clean(result, 0.1);
 
-      if (result && result.length) {
-        result.forEach(renderClipperGroup);
+      if (offsetPath) {
+        renderClipperGroup(offsetPath[0]);
       }
     }
   }
@@ -230,10 +246,7 @@ function xor(a, b) {
 }
 
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(.1, .1);
-
-  var scale = 1000;
-  ClipperLib.JS.ScaleUpPaths(paths, scale);
+  var co = new ClipperLib.ClipperOffset(0, 0);
 
   co.AddPaths(paths,
     ClipperLib.JoinType.jtMiter,
@@ -241,11 +254,11 @@ function offsetHull(paths, offset) {
   );
 
   var result = new ClipperLib.Paths();
-  co.Execute(result, offset * scale);
+  co.Execute(result, offset * clipperScale);
 
-  ClipperLib.JS.ScaleDownPaths(result, scale)
+  ClipperLib.JS.ScaleDownPaths(result, clipperScale)
 
-  return ClipperLib.JS.Clean(result, 1);
+  return result;//ClipperLib.JS.Clean(result, 1);
 }
 
 tick();
