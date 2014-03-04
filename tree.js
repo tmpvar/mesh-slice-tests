@@ -23,9 +23,21 @@ canvas.height = window.innerHeight;
 ///
 
 var slicer = new MeshSlicePolygon();
-
+var modelScale = 100
 for (var i = 0; i<model.length; i++) {
   var facet = model[i];
+
+  model[i].verts[0][0] *= modelScale;
+  model[i].verts[0][1] *= modelScale;
+  model[i].verts[0][2] *= modelScale;
+
+  model[i].verts[1][0] *= modelScale;
+  model[i].verts[1][1] *= modelScale;
+  model[i].verts[1][2] *= modelScale;
+
+  model[i].verts[2][0] *= modelScale;
+  model[i].verts[2][1] *= modelScale;
+  model[i].verts[2][2] *= modelScale;
 
   slicer.addTriangle(
     model[i].verts[0],
@@ -34,13 +46,13 @@ for (var i = 0; i<model.length; i++) {
   );
 }
 
-var sliceZ = slicer.bounds.max[2]-.0001;
+var sliceZ = slicer.bounds.max[2]-.001;
 
 var tick = function(stop) {
 
-  var groups = slicer.slice(sliceZ);
-  console.log('groups', groups.length, '@', sliceZ);
-  if (!groups.length) {
+  var hulls = slicer.slice(sliceZ);
+  console.log('hulls', hulls.length, '@', sliceZ);
+  if (!hulls.length) {
     return console.log('DONE');
   }
 
@@ -54,22 +66,6 @@ var tick = function(stop) {
   ctx.scale(.5, .5);
   ctx.lineWidth = 2;
   var scale = 100;
-
-  var hulls = groups.map(function(group, groupId) {
-    var last = null, seen = {};
-
-    var hull = group.map(function(point) {
-      return Vec2.fromArray([point.position[0]*scale, point.position[1]*scale]);
-    });
-
-    var poly = Polygon(hull);
-
-    if (poly.area() < 0) {
-      poly.rewind(true);
-    }
-
-    return poly;
-  });
 
   hulls.sort(function(a, b) {
     return (a.area() > b.area()) ? -1 : 1;
@@ -116,10 +112,10 @@ var tick = function(stop) {
 
   offsetHulls(hulls);
 
-  sliceZ -= .001;
+  sliceZ -= 1;
 
   ctx.restore();
-  if (sliceZ > .05) {
+  if (sliceZ > 1) {
     requestAnimationFrame(tick);
   } else {
     sliceZ = -1;
@@ -130,21 +126,29 @@ var tick = function(stop) {
 function offsetHulls(hulls) {
   var result = null;
   var amount = 20;
-  for (var i = amount; i<200; i+=amount) {
+
+  // TODO: total number of iterations should be a combination of:
+  //  * steps from aabb to stock aabb
+  //  * for holes, if the poly area is < 0 then ignore for this layer
+
+  // TODO PERF: the nested map below is eating up the cpu
+
+
+  for (var i = amount; i<=200; i+=amount) {
     for (var j = 0; j<hulls.length; j++) {
 
-      var paths = hulls[j].points.map(function(vert) {
+      var path = hulls[j].points.map(function(vert) {
         return { X: vert.x, Y: vert.y };
-      });
+      })
 
-      var offsetPaths = offsetHull([paths], hulls[j].isHole ? -i : i);
+      var offsetPath = offsetHull([path], hulls[j].isHole ? -i : i);
 
       if (!result) {
-        result = offsetPaths;
+        result = offsetPath;
       } else if (!hulls[j].isHole) {
-        result = union(offsetPaths, result);
+        result = union(offsetPath, result);
       } else {
-        result = xor(offsetPaths, result);
+        result = xor(offsetPath, result);
       }
 
       result = ClipperLib.JS.Clean(result, 0.1);
@@ -208,7 +212,7 @@ function xor(a, b) {
 function offsetHull(paths, offset) {
   var co = new ClipperLib.ClipperOffset(1, 100);
 
-  var scale = 1000;
+  var scale = 10;
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
