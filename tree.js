@@ -107,7 +107,6 @@ var tick = function(stop) {
   ctx.stroke();
   ctx.fill();
 
-
   offsetHulls(hulls);
   console.log('elapsed', Date.now() - start);
 
@@ -123,18 +122,19 @@ var tick = function(stop) {
   }
 };
 
-var clipperScale = 100;
+var clipperScale = 1000;
+var amount = 20;
+
 function offsetHulls(hulls) {
   var result = null;
-  var amount = 20;
 
   var ignore = {}, paths = new Array(hulls.length);
-  var holeCount = 0;
+
   for (var j = 0; j<hulls.length; j++) {
     var path = new Array(hulls[j].points.length);
     var points = hulls[j].points;
     for (var k = 0; k<points.length; k++) {
-      path[k] = { X: points[k].x*clipperScale, Y: points[k].y*clipperScale };
+      path[k] = { X: points[k].x, Y: points[k].y };
     }
 
     if (!hulls[j].isHole) {
@@ -150,29 +150,25 @@ function offsetHulls(hulls) {
       }
     } else {
       paths[j] = path;
-      holeCount++;
     }
   }
 
-  var i = 0;
-  while(holeCount) {
-    i+=amount;
-    for (var j = 0; j<paths.length; j++) {
+  // Holes
+  for (var j = 0; j<paths.length; j++) {
+    if (ignore[j] || !paths[j]) {
+      continue;
+    }
+    var result = offsetHull([paths[j]], -amount);
 
-      if (ignore[j] || !paths[j] || !holeCount) {
-        continue;
-      }
+    renderClipperGroup(result[0]);
 
-      var path = new Array(paths[j].length), current = paths[j];
-      for (var k = 0; k < paths[j].length; k++) {
-        path[k] = { X: current[k].X, Y: current[k].Y };
-      }
+    var sential = 10000;
+    while (result && sential--) {
 
-      var offsetPath = offsetHull([path], -i);
-      if (!offsetPath.length || ClipperLib.JS.AreaOfPolygon(offsetPath[0], 1) <= 0) {
-        ignore[j] = true;
-        holeCount--;
-        continue;
+      var offset = offsetHull([result[result.length-1]], -amount);
+
+      if (!offset.length || !offset[0] || ClipperLib.Clipper.Area(offset[0]) <= 0) {
+        break;
       }
 
       // TODO: if the hull is a hole, and a raytrace into the
@@ -180,20 +176,15 @@ function offsetHulls(hulls) {
       //
       // Why? when we are cutting out holes that traverse the depth of
       //      the model, there is no point in stepping in on every layer.
+      //
+      //  The same is true for contours. Just because it's not a hole
+      //  does not mean that we should only do one iteration.
 
-      if (!result) {
-        result = offsetPath;
-      } else {
-        result = xor(offsetPath, result);
-      }
-
-      result = ClipperLib.JS.Clean(result, 0.1);
-
-      if (offsetPath) {
-        renderClipperGroup(offsetPath[0]);
-      }
+      result = xor(offset, result);
+      renderClipperGroup(offset[0]);
     }
   }
+
   return result;
 }
 
@@ -245,9 +236,11 @@ function xor(a, b) {
   return ret;
 }
 
+
 function offsetHull(paths, offset) {
   var co = new ClipperLib.ClipperOffset(0, 0);
 
+  ClipperLib.JS.ScaleUpPaths(paths, clipperScale)
   co.AddPaths(paths,
     ClipperLib.JoinType.jtMiter,
     ClipperLib.EndType.etClosedPolygon
@@ -255,10 +248,8 @@ function offsetHull(paths, offset) {
 
   var result = new ClipperLib.Paths();
   co.Execute(result, offset * clipperScale);
-
   ClipperLib.JS.ScaleDownPaths(result, clipperScale)
-
-  return result;//ClipperLib.JS.Clean(result, 1);
+  return ClipperLib.JS.Clean(result, 1);
 }
 
 tick();
