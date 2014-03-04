@@ -52,9 +52,6 @@ var tick = function(stop) {
 
   var hulls = slicer.slice(sliceZ);
   console.log('hulls', hulls.length, '@', sliceZ);
-  if (!hulls.length) {
-    return console.log('DONE');
-  }
 
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -117,9 +114,11 @@ var tick = function(stop) {
   ctx.restore();
   if (sliceZ > 1) {
     requestAnimationFrame(tick);
-  } else {
+  } else if (sliceZ > 0) {
     sliceZ = -1;
     requestAnimationFrame(tick);
+  } else {
+    console.log('DONE');
   }
 };
 
@@ -132,16 +131,27 @@ function offsetHulls(hulls) {
   //  * for holes, if the poly area is < 0 then ignore for this layer
 
   // TODO PERF: the nested map below is eating up the cpu
-
+  var ignore = {};
 
   for (var i = amount; i<=200; i+=amount) {
     for (var j = 0; j<hulls.length; j++) {
+
+      if (ignore[j]) {
+        continue;
+      }
 
       var path = hulls[j].points.map(function(vert) {
         return { X: vert.x, Y: vert.y };
       })
 
       var offsetPath = offsetHull([path], hulls[j].isHole ? -i : i);
+
+      // TODO:
+      // This does a single offset around contours.
+      // Definitely something that should be configurable
+      if (!hulls[j].isHole) {
+        ignore[j] = true;
+      }
 
       if (!result) {
         result = offsetPath;
@@ -210,13 +220,13 @@ function xor(a, b) {
 }
 
 function offsetHull(paths, offset) {
-  var co = new ClipperLib.ClipperOffset(1, 100);
+  var co = new ClipperLib.ClipperOffset(.1, .1);
 
-  var scale = 10;
+  var scale = 1000;
   ClipperLib.JS.ScaleUpPaths(paths, scale);
 
   co.AddPaths(paths,
-    ClipperLib.JoinType.jtSquare,
+    ClipperLib.JoinType.jtRound,
     ClipperLib.EndType.etClosedPolygon
   );
 
@@ -225,7 +235,7 @@ function offsetHull(paths, offset) {
 
   ClipperLib.JS.ScaleDownPaths(result, scale)
 
-  return result;
+  return ClipperLib.JS.Clean(result, 1);
 }
 
 tick();
